@@ -2,12 +2,23 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Casa abandonada</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <canvas id="game" aria-label="Juego de terror 2D"></canvas>
+    <div id="mobile-controls" aria-label="Controles táctiles" hidden>
+      <div id="movement-stick" class="touch-stick" aria-label="Mover al jugador">
+        <span class="stick-knob"></span>
+      </div>
+      <div class="touch-actions">
+        <button type="button" data-touch-action="run" aria-label="Correr">Correr</button>
+        <button type="button" data-touch-action="crouch" aria-label="Agacharse">Agacharse</button>
+        <button type="button" data-touch-action="interact" aria-label="Interactuar">Usar</button>
+        <button type="button" data-touch-action="throw" aria-label="Lanzar objeto">Lanzar</button>
+      </div>
+    </div>
     <script type="module" src="js/main.js"></script>
   </body>
 </html>

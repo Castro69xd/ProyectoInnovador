@@ -2,11 +2,18 @@ import { Dino } from "./dino.js";
 import { GameMap } from "./map.js";
 import { Player } from "./player.js";
 import { AudioSystem } from "./audio.js";
-import { currentDifficulty, GAME_CONFIG, setDifficulty } from "./config.js";
+import {
+  currentDifficulty,
+  DIFFICULTIES,
+  GAME_CONFIG,
+  setDifficulty,
+} from "./config.js";
 import { UI } from "./ui.js";
 
 const canvas = document.querySelector("#game");
 const context = canvas.getContext("2d");
+const mobileControls = document.querySelector("#mobile-controls");
+const movementStick = document.querySelector("#movement-stick");
 
 if (!context) {
   throw new Error("No se pudo inicializar el contexto 2D del canvas.");
@@ -17,6 +24,11 @@ const player = new Player();
 const dino = new Dino();
 const audio = new AudioSystem();
 const ui = new UI();
+// La selección se conserva durante los reintentos de esta pestaña.
+const savedDifficulty = sessionStorage.getItem("casa-depredador-difficulty");
+if (savedDifficulty && Object.hasOwn(DIFFICULTIES, savedDifficulty)) {
+  setDifficulty(savedDifficulty);
+}
 const grainCanvas = document.createElement("canvas");
 grainCanvas.width = 160;
 grainCanvas.height = 90;
@@ -28,6 +40,8 @@ const grainImage = grainContext.createImageData(grainCanvas.width, grainCanvas.h
 let lastFrameTime = 0;
 let batteryLevel = 100;
 let renderPixelRatio = 1;
+let houseLightsOn = false;
+let houseLightsTimer = 0;
 let mouseX = window.innerWidth;
 let mouseY = window.innerHeight / 2;
 let flicker = 1;
@@ -59,25 +73,118 @@ function activateAudio() {
 window.addEventListener("keydown", activateAudio, { once: true });
 window.addEventListener("pointerdown", activateAudio, { once: true });
 
-canvas.addEventListener("mousemove", (event) => {
+function updateAimFromPointer(event) {
   const bounds = canvas.getBoundingClientRect();
   mouseX = event.clientX - bounds.left;
   mouseY = event.clientY - bounds.top;
+}
+
+canvas.addEventListener("pointermove", updateAimFromPointer);
+canvas.addEventListener("pointerdown", (event) => {
+  if (gameState === "playing") updateAimFromPointer(event);
 });
+
+function setStickDirection(event) {
+  const bounds = movementStick.getBoundingClientRect();
+  const radius = bounds.width * 0.34;
+  const offsetX = event.clientX - (bounds.left + bounds.width / 2);
+  const offsetY = event.clientY - (bounds.top + bounds.height / 2);
+  const distance = Math.hypot(offsetX, offsetY);
+  const scale = distance > radius ? radius / distance : 1;
+  const x = offsetX * scale;
+  const y = offsetY * scale;
+  const knob = movementStick.querySelector(".stick-knob");
+  knob.style.left = `${50 + (x / bounds.width) * 100}%`;
+  knob.style.top = `${50 + (y / bounds.height) * 100}%`;
+
+  for (const key of ["a", "d", "w", "s"]) player.keys.delete(key);
+  if (distance > radius * 0.18) {
+    if (x < -radius * 0.2) player.keys.add("a");
+    if (x > radius * 0.2) player.keys.add("d");
+    if (y < -radius * 0.2) player.keys.add("w");
+    if (y > radius * 0.2) player.keys.add("s");
+  }
+}
+
+function resetMovementStick() {
+  for (const key of ["a", "d", "w", "s"]) player.keys.delete(key);
+  const knob = movementStick.querySelector(".stick-knob");
+  knob.style.left = "50%";
+  knob.style.top = "50%";
+}
+
+movementStick.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  movementStick.setPointerCapture(event.pointerId);
+  setStickDirection(event);
+});
+movementStick.addEventListener("pointermove", (event) => {
+  if (movementStick.hasPointerCapture(event.pointerId)) setStickDirection(event);
+});
+movementStick.addEventListener("pointerup", resetMovementStick);
+movementStick.addEventListener("pointercancel", resetMovementStick);
+
+for (const button of mobileControls.querySelectorAll("[data-touch-action]")) {
+  const action = button.dataset.touchAction;
+  const heldKey = action === "run" ? "control" : action === "crouch" ? "shift" : null;
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    button.classList.add("is-pressed");
+    if (action === "interact") player.interactPressed = true;
+    if (action === "throw") player.throwPressed = true;
+    if (heldKey) player.keys.add(heldKey);
+  });
+  const release = () => {
+    button.classList.remove("is-pressed");
+    if (heldKey) player.keys.delete(heldKey);
+  };
+  button.addEventListener("pointerup", release);
+  button.addEventListener("pointercancel", release);
+  button.addEventListener("lostpointercapture", release);
+}
 
 function startGame() {
   player.keys.clear();
   player.consumeInteractPressed();
   player.consumeThrowPressed();
+  houseLightsOn = GAME_CONFIG.houseLights.alwaysOn;
+  houseLightsTimer = houseLightsOn
+    ? 0
+    : GAME_CONFIG.houseLights.offDuration;
   gameState = "playing";
   lastFrameTime = 0;
   activateAudio();
 }
 
+function updateHouseLights(deltaTime) {
+  if (
+    currentDifficulty === "easy" ||
+    currentDifficulty === "hard" ||
+    GAME_CONFIG.houseLights.alwaysOn
+  ) {
+    houseLightsOn = GAME_CONFIG.houseLights.alwaysOn;
+    return;
+  }
+
+  houseLightsTimer -= deltaTime;
+  while (houseLightsTimer <= 0) {
+    houseLightsOn = !houseLightsOn;
+    houseLightsTimer += houseLightsOn
+      ? GAME_CONFIG.houseLights.onDuration
+      : GAME_CONFIG.houseLights.offDuration;
+  }
+}
+
+function chooseDifficulty(difficulty) {
+  setDifficulty(difficulty);
+  sessionStorage.setItem("casa-depredador-difficulty", difficulty);
+}
+
 window.addEventListener("keydown", (event) => {
   if (gameState === "title" && ["1", "2", "3"].includes(event.key)) {
     const difficulty = { 1: "easy", 2: "normal", 3: "hard" }[event.key];
-    setDifficulty(difficulty);
+    chooseDifficulty(difficulty);
   } else if (gameState === "title" && event.key === "Enter") {
     startGame();
   } else if (
@@ -98,7 +205,7 @@ canvas.addEventListener("click", (event) => {
       bounds.height,
     );
     if (action?.type === "difficulty") {
-      setDifficulty(action.difficulty);
+      chooseDifficulty(action.difficulty);
     } else {
       startGame();
     }
@@ -137,6 +244,7 @@ function triggerScareEvent() {
   }
 
   if (eventType === "fall") {
+    // El ruido debe alcanzar al depredador incluso si una pared lo oculta.
     const maximumHearingDistance =
       (GAME_CONFIG.dino.hearingBase +
         GAME_CONFIG.noise.scare * GAME_CONFIG.dino.hearingPerLoudness) *
@@ -230,6 +338,7 @@ function drawTerrorEffects(
 
   grainRefreshCooldown -= deltaTime;
   if (grainRefreshCooldown <= 0) {
+    // El grano cambia a 10 Hz; dibujarlo se mantiene a la frecuencia de pantalla.
     grainRefreshCooldown = 0.1;
     const pixels = grainImage.data;
     for (let index = 0; index < pixels.length; index += 4) {
@@ -288,12 +397,14 @@ function drawTerrorEffects(
 }
 
 function frame(timestamp) {
+  mobileControls.hidden = gameState !== "playing";
   const deltaTime = lastFrameTime === 0 ? 0 : (timestamp - lastFrameTime) / 1000;
   lastFrameTime = timestamp;
 
   const frameDelta = Math.min(deltaTime, 0.05);
   if (gameState === "playing") {
     updateScareEvents(frameDelta);
+    updateHouseLights(frameDelta);
 
     if (player.consumeInteractPressed()) {
       if (player.isHidden) {
@@ -544,8 +655,10 @@ function frame(timestamp) {
       : gameState === "attack"
         ? 8 + Math.min(10, attackElapsed * 5)
         : 0;
-  const shakeX = (Math.random() * 2 - 1) * shakeStrength;
-  const shakeY = (Math.random() * 2 - 1) * shakeStrength;
+  const shakeX =
+    shakeStrength > 0 ? (Math.random() * 2 - 1) * shakeStrength : 0;
+  const shakeY =
+    shakeStrength > 0 ? (Math.random() * 2 - 1) * shakeStrength : 0;
   const camera = gameMap.getCameraPosition(
     player.x + player.size / 2,
     player.y + player.size / 2,
@@ -563,20 +676,22 @@ function frame(timestamp) {
     player.draw(context);
     context.restore();
 
-    gameMap.drawDarkness(
-      context,
-      width,
-      height,
-      renderPixelRatio,
-      player.x + player.size / 2,
-      player.y + player.size / 2,
-      camera.x,
-      camera.y,
-      mouseX,
-      mouseY,
-      player.isHidden ? 0 : batteryLevel,
-      flicker * lightFlickerFactor,
-    );
+    if (!houseLightsOn) {
+      gameMap.drawDarkness(
+        context,
+        width,
+        height,
+        renderPixelRatio,
+        player.x + player.size / 2,
+        player.y + player.size / 2,
+        camera.x,
+        camera.y,
+        mouseX,
+        mouseY,
+        player.isHidden ? 0 : batteryLevel,
+        flicker * lightFlickerFactor,
+      );
+    }
   }
 
   if (gameState === "playing" && player.isHidden) {
@@ -598,6 +713,7 @@ function frame(timestamp) {
     context.fillRect(slitX, slitY + 18, slitWidth, 4);
   }
 
+  if (gameState === "playing") {
   context.fillStyle = "rgba(8, 9, 9, 0.82)";
   context.fillRect(16, 16, 184, 72);
   context.fillStyle = "#c5c0a9";
@@ -625,6 +741,20 @@ function frame(timestamp) {
   context.font = "12px sans-serif";
   context.fillText(`DINO: ${dino.state}`, width - 18, 30);
   context.textAlign = "start";
+
+  if (gameState === "playing") {
+    context.fillStyle = "rgba(8, 9, 9, 0.72)";
+    context.font = "11px sans-serif";
+    context.textAlign = "center";
+    const lightStatus =
+      currentDifficulty === "hard"
+        ? "SOLO LINTERNA"
+        : houseLightsOn
+          ? "LUZ ENCENDIDA"
+          : `LUZ APAGADA · ${Math.ceil(houseLightsTimer)} s`;
+    context.fillText(lightStatus, width / 2, 28);
+    context.textAlign = "start";
+  }
 
   context.fillStyle = "rgba(8, 9, 9, 0.88)";
   context.fillRect(width - 220, 42, 204, 108);
@@ -685,7 +815,7 @@ function frame(timestamp) {
     context.fillStyle = "#c5c0a9";
     context.font = `${width < 560 ? 10 : 12}px sans-serif`;
     context.fillText(
-      "WASD mover · SHIFT agacharse · CTRL correr · F lanzar",
+      "WASD/Flechas mover · SHIFT agacharse · CTRL correr · F lanzar",
       26,
       height - 22,
     );
@@ -766,6 +896,7 @@ function frame(timestamp) {
     context.font = "14px sans-serif";
     context.fillText("¡Te ha descubierto! Sal del escondite.", width / 2, 102);
     context.textAlign = "start";
+  }
   }
 
   if (gameState === "title") {

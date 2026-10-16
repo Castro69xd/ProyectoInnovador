@@ -29,6 +29,13 @@ const BALANCE_BASE = {
     ambientRange: 78,
     emptyAmbientRange: 38,
   },
+  houseLights: {
+    alwaysOn: false,
+    offDuration: 15,
+    onDuration: 5,
+    playerAmbientRadius: 78,
+    emptyAmbientRadius: 38,
+  },
   noise: {
     walking: 0.28,
     running: 1,
@@ -45,7 +52,7 @@ const BALANCE_BASE = {
 export const DIFFICULTIES = {
   easy: {
     label: "Fácil",
-    description: "Más tiempo y un depredador menos alerta",
+    description: "Casa siempre iluminada y dinosaurio menos alerta",
     player: { walkSpeed: 165, sprintSpeed: 275 },
     dino: {
       patrolSpeed: 68,
@@ -59,17 +66,19 @@ export const DIFFICULTIES = {
       occludedHearingMultiplier: 0.48,
     },
     battery: { durationSeconds: 85 },
+    houseLights: { alwaysOn: true },
   },
   normal: {
     label: "Normal",
-    description: "Una experiencia equilibrada",
+    description: "Luces apagadas 15 s y encendidas 5 s",
     player: {},
     dino: {},
     battery: {},
+    houseLights: {},
   },
   hard: {
     label: "Difícil",
-    description: "Te detecta antes y la batería dura menos",
+    description: "Solo ves el cono de la linterna",
     player: { sprintSpeed: 250, staminaDrain: 38 },
     dino: {
       patrolSpeed: 96,
@@ -83,6 +92,7 @@ export const DIFFICULTIES = {
       occludedHearingMultiplier: 0.7,
     },
     battery: { durationSeconds: 42 },
+    houseLights: { playerAmbientRadius: 0, emptyAmbientRadius: 0 },
   },
 };
 
@@ -91,6 +101,7 @@ export const GAME_CONFIG = {
   player: { ...BALANCE_BASE.player },
   dino: { ...BALANCE_BASE.dino },
   battery: { ...BALANCE_BASE.battery },
+  houseLights: { ...BALANCE_BASE.houseLights },
   noise: { ...BALANCE_BASE.noise },
 };
 
@@ -104,7 +115,7 @@ export function setDifficulty(difficulty) {
   }
 
   currentDifficulty = difficulty;
-  for (const category of ["player", "dino", "battery"]) {
+  for (const category of ["player", "dino", "battery", "houseLights"]) {
     Object.assign(GAME_CONFIG[category], BALANCE_BASE[category], settings[category]);
   }
   Object.assign(GAME_CONFIG.noise, BALANCE_BASE.noise);

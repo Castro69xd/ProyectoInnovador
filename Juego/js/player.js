@@ -3,6 +3,12 @@ import { GAME_CONFIG } from "./config.js";
 // Velocidad, sigilo y resistencia se ajustan desde la configuración global.
 const PLAYER_SIZE = 24;
 const MAX_STAMINA = 100;
+const MOVEMENT_KEY_ALIASES = {
+  arrowup: "w",
+  arrowleft: "a",
+  arrowdown: "s",
+  arrowright: "d",
+};
 
 export class Player {
   constructor() {
@@ -19,6 +25,7 @@ export class Player {
     this.isCrouching = false;
     this.facingX = 1;
     this.facingY = 0;
+    this.walkTime = 0;
     this.throwPressed = false;
 
     window.addEventListener("keydown", (event) => {
@@ -35,14 +42,16 @@ export class Player {
         return;
       }
 
-      if (["w", "a", "s", "d", "shift", "control"].includes(key)) {
+      const movementKey = MOVEMENT_KEY_ALIASES[key] ?? key;
+      if (["w", "a", "s", "d", "shift", "control"].includes(movementKey)) {
         event.preventDefault();
-        this.keys.add(key);
+        this.keys.add(movementKey);
       }
     });
 
     window.addEventListener("keyup", (event) => {
-      this.keys.delete(event.key.toLowerCase());
+      const key = event.key.toLowerCase();
+      this.keys.delete(MOVEMENT_KEY_ALIASES[key] ?? key);
     });
 
     window.addEventListener("blur", () => {
@@ -83,6 +92,10 @@ export class Player {
       !this.isCrouching &&
       this.isMoving &&
       this.stamina > 0;
+    if (this.isMoving) {
+      const gaitSpeed = this.isRunning ? 15 : this.isCrouching ? 5 : 10;
+      this.walkTime += deltaTime * gaitSpeed;
+    }
     if (this.isRunning) {
       this.stamina = Math.max(
         0,
@@ -110,10 +123,30 @@ export class Player {
 
     if (!gameMap.collidesAt(this.x + movementX, this.y, this.size, this.size)) {
       this.x += movementX;
+    } else {
+      const alignment = gameMap.alignActorWithOpenDoor(
+        this.x,
+        this.y,
+        this.size,
+        this.size,
+        "horizontal",
+        movementX,
+      );
+      if (alignment) this.y = alignment.y;
     }
 
     if (!gameMap.collidesAt(this.x, this.y + movementY, this.size, this.size)) {
       this.y += movementY;
+    } else {
+      const alignment = gameMap.alignActorWithOpenDoor(
+        this.x,
+        this.y,
+        this.size,
+        this.size,
+        "vertical",
+        movementY,
+      );
+      if (alignment) this.x = alignment.x;
     }
   }
 
@@ -149,7 +182,96 @@ export class Player {
   draw(context) {
     if (this.isHidden) return;
 
-    context.fillStyle = "#fff";
-    context.fillRect(this.x, this.y, PLAYER_SIZE, PLAYER_SIZE);
+    context.save();
+    const centerX = this.x + PLAYER_SIZE / 2;
+    const centerY = this.y + PLAYER_SIZE / 2;
+    const sideX = -this.facingY;
+    const sideY = this.facingX;
+    const step = this.isMoving ? Math.sin(this.walkTime) * 1.5 : 0;
+    const stride = this.isMoving
+      ? Math.cos(this.walkTime) * (this.isRunning ? 4.5 : 3)
+      : 0;
+    const crouchOffset = this.isCrouching ? 2 : 0;
+
+    const point = (side, forward) => ({
+      x: centerX + sideX * side + this.facingX * forward,
+      y: centerY + sideY * side + this.facingY * forward,
+    });
+    const drawLimb = (start, end, color, width) => {
+      context.strokeStyle = color;
+      context.lineWidth = width;
+      context.lineCap = "round";
+      context.beginPath();
+      context.moveTo(start.x, start.y);
+      context.lineTo(end.x, end.y);
+      context.stroke();
+    };
+
+    context.fillStyle = "rgba(0, 0, 0, 0.55)";
+    context.beginPath();
+    context.ellipse(centerX + 2, centerY + 5, 9, 12, 0, 0, Math.PI * 2);
+    context.fill();
+
+    // Las piernas alternan el paso según la velocidad y la dirección del jugador.
+    for (const side of [-1, 1]) {
+      const hip = point(side * 3, -1 + crouchOffset);
+      const foot = point(side * 4 + step, -4 + side * stride + crouchOffset);
+      drawLimb(hip, foot, "#201a19", 4.5);
+      drawLimb(
+        foot,
+        point(side * 4 + step, -5 + side * stride + crouchOffset),
+        "#76604b",
+        2.5,
+      );
+    }
+
+    // Brazos y torso forman una silueta humana visible también con poca luz.
+    for (const side of [-1, 1]) {
+      drawLimb(
+        point(side * 4, 4 + crouchOffset),
+        point(side * 7 + step, -1 - side * stride * 0.45 + crouchOffset),
+        "#9a795d",
+        3.5,
+      );
+    }
+
+    const torso = point(0, 1 + crouchOffset);
+    context.fillStyle = "#5b4033";
+    context.beginPath();
+    context.ellipse(
+      torso.x,
+      torso.y,
+      5.5,
+      8,
+      Math.atan2(this.facingY, this.facingX) + Math.PI / 2,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+    context.fillStyle = "#87694e";
+    context.beginPath();
+    context.ellipse(
+      torso.x - sideX,
+      torso.y - sideY,
+      2,
+      5,
+      Math.atan2(this.facingY, this.facingX) + Math.PI / 2,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+
+    const head = point(0, 8 + crouchOffset);
+    context.fillStyle = "#c49a73";
+    context.beginPath();
+    context.arc(head.x, head.y, 3.5, 0, Math.PI * 2);
+    context.fill();
+
+    const hair = point(0, 9.2 + crouchOffset);
+    context.fillStyle = "#30251f";
+    context.beginPath();
+    context.arc(hair.x, hair.y, 3.1, Math.PI, Math.PI * 2);
+    context.fill();
+    context.restore();
   }
 }

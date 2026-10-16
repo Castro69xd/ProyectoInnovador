@@ -2,7 +2,143 @@ import { GAME_CONFIG } from "./config.js";
 
 // La IA consulta estos estados para alternar patrulla, investigación y caza.
 const TILE_SIZE = 40;
-const DINO_SIZE = 34;
+const DINO_SIZE = 28;
+
+function createUnitSphereFaces() {
+  const rows = 5;
+  const columns = 8;
+  const vertices = [];
+
+  for (let row = 0; row <= rows; row += 1) {
+    const latitude = (Math.PI * row) / rows;
+    for (let column = 0; column <= columns; column += 1) {
+      const longitude = (2 * Math.PI * column) / columns;
+      vertices.push([
+        Math.sin(latitude) * Math.cos(longitude),
+        Math.sin(latitude) * Math.sin(longitude),
+        Math.cos(latitude),
+      ]);
+    }
+  }
+
+  const faces = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const first = row * (columns + 1) + column;
+      const next = first + columns + 1;
+      faces.push([vertices[first], vertices[next], vertices[first + 1]]);
+      faces.push([
+        vertices[first + 1],
+        vertices[next],
+        vertices[next + 1],
+      ]);
+    }
+  }
+
+  return faces.map((face) => {
+    const [first, second, third] = face;
+    const edgeA = second.map((value, index) => value - first[index]);
+    const edgeB = third.map((value, index) => value - first[index]);
+    const normal = [
+      edgeA[1] * edgeB[2] - edgeA[2] * edgeB[1],
+      edgeA[2] * edgeB[0] - edgeA[0] * edgeB[2],
+      edgeA[0] * edgeB[1] - edgeA[1] * edgeB[0],
+    ];
+    const center = first.map(
+      (value, index) => value + second[index] + third[index],
+    );
+    if (normal[0] * center[0] + normal[1] * center[1] + normal[2] * center[2] < 0) {
+      return [first, third, second];
+    }
+    return face;
+  });
+}
+
+const UNIT_SPHERE_FACES = createUnitSphereFaces();
+const DINO_MODEL_PARTS = [
+  { x: -10, y: 14, z: 8, rx: 7, ry: 11, rz: 7, color: "#536347", gait: 1 },
+  { x: 10, y: 14, z: 8, rx: 7, ry: 11, rz: 7, color: "#46583c", gait: -1 },
+  { x: -12, y: 24, z: 5, rx: 4.5, ry: 8, rz: 4.5, color: "#394832", gait: 1 },
+  { x: 12, y: 24, z: 5, rx: 4.5, ry: 8, rz: 4.5, color: "#303f2d", gait: -1 },
+  { x: -12, y: 29, z: 3, rx: 5, ry: 7, rz: 2.8, color: "#283629", gait: 1 },
+  { x: 12, y: 29, z: 3, rx: 5, ry: 7, rz: 2.8, color: "#243126", gait: -1 },
+  { x: 0, y: 29, z: 12, rx: 8, ry: 13, rz: 6, color: "#3d4d35" },
+  { x: 0, y: 40, z: 9, rx: 5.5, ry: 13, rz: 4.2, color: "#34432f" },
+  { x: 0, y: 51, z: 7, rx: 3, ry: 12, rz: 2.5, color: "#29392b" },
+  { x: 0, y: 2, z: 14, rx: 14, ry: 24, rz: 13, color: "#63734b" },
+  { x: 0, y: -13, z: 13, rx: 10, ry: 14, rz: 11, color: "#728152" },
+  { x: -8, y: -15, z: 10, rx: 3.5, ry: 8, rz: 3.5, color: "#46563a", gait: -0.45 },
+  { x: 8, y: -15, z: 10, rx: 3.5, ry: 8, rz: 3.5, color: "#3c4d35", gait: 0.45 },
+  { x: 0, y: -25, z: 14, rx: 7.5, ry: 14, rz: 8, color: "#718052" },
+  { x: 0, y: -37, z: 16, rx: 9, ry: 11, rz: 7.5, color: "#83905a" },
+  { x: 0, y: -45, z: 12, rx: 6.5, ry: 8, rz: 4.5, color: "#66764a" },
+].map((part) => ({
+  ...part,
+  rgb: [
+    Number.parseInt(part.color.slice(1, 3), 16),
+    Number.parseInt(part.color.slice(3, 5), 16),
+    Number.parseInt(part.color.slice(5, 7), 16),
+  ],
+}));
+
+function transformDinoPoint(x, y, z, angle, originX, originY) {
+  const rotatedX = x * Math.cos(angle) - y * Math.sin(angle);
+  const rotatedY = x * Math.sin(angle) + y * Math.cos(angle);
+  return {
+    x: originX + rotatedX,
+    y: originY + rotatedY * 0.72 - z * 0.68,
+    depth: rotatedY * 0.68 + z * 0.72,
+  };
+}
+
+function drawDinoMeshPart(context, part, angle, originX, originY, gait, breathe) {
+  const limbAngle = part.gait ? gait * part.gait : 0;
+  const cosine = Math.cos(limbAngle);
+  const sine = Math.sin(limbAngle);
+  const transformed = UNIT_SPHERE_FACES.map((face) =>
+    face.map(([unitX, unitY, unitZ]) => {
+      const localX = unitX * part.rx;
+      const localY = unitY * part.ry;
+      const localZ = unitZ * part.rz;
+      const rotatedY = localY * cosine - localZ * sine;
+      const rotatedZ = localY * sine + localZ * cosine;
+      return transformDinoPoint(
+        part.x + localX,
+        part.y + rotatedY,
+        part.z + rotatedZ + breathe,
+        angle,
+        originX,
+        originY,
+      );
+    }),
+  );
+
+  for (let index = 0; index < UNIT_SPHERE_FACES.length; index += 1) {
+    const face = transformed[index];
+    const [a, b, c] = face;
+    const edgeA = [b.x - a.x, b.y - a.y, b.depth - a.depth];
+    const edgeB = [c.x - a.x, c.y - a.y, c.depth - a.depth];
+    const normalX = edgeA[1] * edgeB[2] - edgeA[2] * edgeB[1];
+    const normalY = edgeA[2] * edgeB[0] - edgeA[0] * edgeB[2];
+    const normalZ = edgeA[0] * edgeB[1] - edgeA[1] * edgeB[0];
+    const normalLength = Math.hypot(normalX, normalY, normalZ) || 1;
+    const towardViewer = normalZ / normalLength;
+    if (towardViewer <= 0) continue;
+
+    const light =
+      (normalX * -0.34 + normalY * -0.4 + normalZ * 0.82) / normalLength;
+    const shade = 0.48 + Math.max(0, light) * 0.52;
+    context.fillStyle = `rgb(${Math.round(part.rgb[0] * shade)}, ${Math.round(
+      part.rgb[1] * shade,
+    )}, ${Math.round(part.rgb[2] * shade)})`;
+    context.beginPath();
+    context.moveTo(a.x, a.y);
+    context.lineTo(b.x, b.y);
+    context.lineTo(c.x, c.y);
+    context.closePath();
+    context.fill();
+  }
+}
 
 export const DINO_STATES = {
   PATROL: "PATRULLA",
@@ -31,11 +167,13 @@ export class Dino {
     this.investigateWait = 0;
     this.searchTime = 0;
     this.searchPointIndex = 0;
+    this.searchPoints = null;
     this.sniffTime = 0;
     this.isSniffing = false;
     this.hasCaughtPlayer = false;
     this.doorCreaked = false;
     this.walkTime = 0;
+    this.blockedTime = 0;
     this.patrolInitialized = false;
   }
 
@@ -49,6 +187,7 @@ export class Dino {
     if (state === DINO_STATES.SEARCH) {
       this.searchTime = 0;
       this.searchPointIndex = 0;
+      this.searchPoints = null;
     }
 
     if (state !== DINO_STATES.SNIFF) {
@@ -198,7 +337,10 @@ export class Dino {
       }
     } else if (this.state === DINO_STATES.SEARCH) {
       this.searchTime += deltaTime;
-      const searchPoints = this.getSearchPoints(gameMap);
+      if (this.searchPoints === null) {
+        this.searchPoints = this.getSearchPoints(gameMap);
+      }
+      const searchPoints = this.searchPoints;
       if (
         searchPoints.length === 0 ||
         this.searchTime >= GAME_CONFIG.dino.searchDuration
@@ -215,7 +357,13 @@ export class Dino {
       }
     }
 
-    if (gameMap.openDoorNear(this.x, this.y, this.size + 12)) {
+    if (
+      gameMap.openDoorNear(
+        this.x,
+        this.y,
+        TILE_SIZE / 2 + this.size / 2 + 8,
+      )
+    ) {
       this.doorCreaked = true;
       this.path = [];
       this.pathCooldown = 0;
@@ -279,15 +427,27 @@ export class Dino {
     const movementX = (directionX / distance) * step;
     const movementY = (directionY / distance) * step;
 
+    const actorX = this.x - this.size / 2;
+    const actorY = this.y - this.size / 2;
     if (
       !gameMap.collidesAt(
-        this.x - this.size / 2 + movementX,
-        this.y - this.size / 2,
+        actorX + movementX,
+        actorY,
         this.size,
         this.size,
       )
     ) {
       this.x += movementX;
+    } else {
+      const alignment = gameMap.alignActorWithOpenDoor(
+        actorX,
+        actorY,
+        this.size,
+        this.size,
+        "horizontal",
+        movementX,
+      );
+      if (alignment) this.y = alignment.y + this.size / 2;
     }
 
     if (
@@ -299,12 +459,32 @@ export class Dino {
       )
     ) {
       this.y += movementY;
+    } else {
+      const alignment = gameMap.alignActorWithOpenDoor(
+        this.x - this.size / 2,
+        this.y - this.size / 2,
+        this.size,
+        this.size,
+        "vertical",
+        movementY,
+      );
+      if (alignment) this.x = alignment.x + this.size / 2;
     }
 
-    const movementLength = Math.hypot(movementX, movementY);
+    const movedX = this.x - (actorX + this.size / 2);
+    const movedY = this.y - (actorY + this.size / 2);
+    const movementLength = Math.hypot(movedX, movedY);
     if (movementLength > 0) {
-      this.facingX = movementX / movementLength;
-      this.facingY = movementY / movementLength;
+      this.blockedTime = 0;
+      this.facingX = movedX / movementLength;
+      this.facingY = movedY / movementLength;
+    } else {
+      this.blockedTime += deltaTime;
+      if (this.blockedTime >= 0.3) {
+        this.path = [];
+        this.pathCooldown = 0;
+        this.blockedTime = 0;
+      }
     }
   }
 
@@ -363,58 +543,65 @@ export class Dino {
     const walking =
       this.state !== DINO_STATES.SNIFF &&
       this.path.length > 0;
-    const stride = walking ? Math.sin(this.walkTime * 13) * 5 : 0;
+    const gait = walking ? Math.sin(this.walkTime * 13) * 0.3 : 0;
+    const breathe = walking ? Math.sin(this.walkTime * 3) * 0.6 : 0;
 
     context.save();
-    context.translate(this.x, this.y);
-    context.rotate(angle);
-
-    context.fillStyle = "#0a0d0b";
+    context.fillStyle = "rgba(0, 0, 0, 0.48)";
     context.beginPath();
-    context.moveTo(-7, 18);
-    context.lineTo(-5 + Math.sin(this.walkTime * 9) * 3, 51);
-    context.lineTo(0, 59);
-    context.lineTo(5 + Math.sin(this.walkTime * 9) * 3, 51);
-    context.lineTo(7, 18);
-    context.closePath();
+    context.ellipse(this.x + 4, this.y + 10, 22, 38, angle, 0, Math.PI * 2);
     context.fill();
 
-    context.fillStyle = "#20271f";
-    context.fillRect(-22, 9 + stride, 13, 20);
-    context.fillRect(9, 9 - stride, 13, 20);
-    context.fillStyle = "#10140f";
-    context.fillRect(-23, 24 + stride, 15, 8);
-    context.fillRect(8, 24 - stride, 15, 8);
-
-    context.fillStyle = "#30392d";
-    context.beginPath();
-    context.ellipse(0, 0, 23, 34, 0, 0, Math.PI * 2);
-    context.fill();
-    context.fillStyle = "#46503a";
-    context.beginPath();
-    context.ellipse(-5, -1, 7, 26, 0, 0, Math.PI * 2);
-    context.fill();
-
-    context.fillStyle = "#293329";
-    context.beginPath();
-    context.ellipse(0, -29, 19, 20, 0, 0, Math.PI * 2);
-    context.fill();
-    context.fillStyle = "#394333";
-    context.fillRect(-15, -33, 28, 15);
-    context.fillStyle = "#171b16";
-    context.fillRect(-11, -20, 24, 5);
-    context.fillStyle = "#c2b58b";
-    for (let tooth = 0; tooth < 5; tooth += 1) {
-      context.fillRect(-8 + tooth * 4, -20, 2, 4);
+    for (const part of DINO_MODEL_PARTS) {
+      drawDinoMeshPart(context, part, angle, this.x, this.y, gait, breathe);
     }
 
-    context.fillStyle = this.state === DINO_STATES.CHASE ? "#ff4537" : "#d8a14d";
-    context.fillRect(8, -36, 5, 5);
-    context.fillStyle = "#f2d8a1";
-    context.fillRect(10, -35, 2, 2);
-    context.fillStyle = "#4b5140";
-    for (let spike = 0; spike < 5; spike += 1) {
-      context.fillRect(-10 + spike * 5, 16, 4, 8);
+    for (const side of [-1, 1]) {
+      const eye = transformDinoPoint(
+        side * 5.5,
+        -40,
+        19 + breathe,
+        angle,
+        this.x,
+        this.y,
+      );
+      context.fillStyle = "#11140f";
+      context.beginPath();
+      context.arc(eye.x, eye.y, 2.3, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle =
+        this.state === DINO_STATES.CHASE ? "#ff382e" : "#e0a848";
+      context.beginPath();
+      context.arc(eye.x, eye.y, 1.35, 0, Math.PI * 2);
+      context.fill();
+
+      const nostril = transformDinoPoint(
+        side * 2.7,
+        -51,
+        14 + breathe,
+        angle,
+        this.x,
+        this.y,
+      );
+      context.fillStyle = "#20271d";
+      context.beginPath();
+      context.arc(nostril.x, nostril.y, 0.9, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    // Las crestas facetadas se proyectan como triángulos sobre el lomo.
+    for (let spike = 0; spike < 4; spike += 1) {
+      const y = spike * 8 - 11;
+      const left = transformDinoPoint(-3, y, 25 + breathe, angle, this.x, this.y);
+      const tip = transformDinoPoint(0, y - 2, 31 + breathe, angle, this.x, this.y);
+      const right = transformDinoPoint(3, y, 25 + breathe, angle, this.x, this.y);
+      context.fillStyle = "#a0a06b";
+      context.beginPath();
+      context.moveTo(left.x, left.y);
+      context.lineTo(tip.x, tip.y);
+      context.lineTo(right.x, right.y);
+      context.closePath();
+      context.fill();
     }
 
     context.restore();

@@ -594,6 +594,38 @@ export class GameMap {
     return true;
   }
 
+  alignActorWithOpenDoor(x, y, width, height, axis, movement) {
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const axisSize = axis === "vertical" ? height : width;
+
+    for (const door of this.doors) {
+      if (!door.open) continue;
+      const distanceAlongAxis =
+        axis === "vertical"
+          ? Math.abs(door.y - centerY)
+          : Math.abs(door.x - centerX);
+      if (
+        distanceAlongAxis >
+        TILE_SIZE / 2 + axisSize / 2 + Math.abs(movement)
+      ) {
+        continue;
+      }
+
+      const correction =
+        axis === "vertical" ? door.x - centerX : door.y - centerY;
+      if (Math.abs(correction) > TILE_SIZE / 2) continue;
+
+      const alignedX = axis === "vertical" ? x + correction : x;
+      const alignedY = axis === "horizontal" ? y + correction : y;
+      if (!this.collidesAt(alignedX, alignedY, width, height)) {
+        return { x: alignedX, y: alignedY };
+      }
+    }
+
+    return null;
+  }
+
   addThrownObject(x, y) {
     this.thrownObjects.push({ x, y, remaining: 12 });
   }
@@ -764,23 +796,25 @@ export class GameMap {
     }
 
     const ambientRadius = hasBattery
-      ? GAME_CONFIG.battery.ambientRange
-      : GAME_CONFIG.battery.emptyAmbientRange;
-    const ambientGradient = lightContext.createRadialGradient(
-      screenX,
-      screenY,
-      0,
-      screenX,
-      screenY,
-      ambientRadius,
-    );
-    ambientGradient.addColorStop(0, "rgba(0, 0, 0, 0.94)");
-    ambientGradient.addColorStop(0.65, "rgba(0, 0, 0, 0.72)");
-    ambientGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-    lightContext.fillStyle = ambientGradient;
-    lightContext.beginPath();
-    lightContext.arc(screenX, screenY, ambientRadius, 0, Math.PI * 2);
-    lightContext.fill();
+      ? GAME_CONFIG.houseLights.playerAmbientRadius
+      : GAME_CONFIG.houseLights.emptyAmbientRadius;
+    if (ambientRadius > 0) {
+      const ambientGradient = lightContext.createRadialGradient(
+        screenX,
+        screenY,
+        0,
+        screenX,
+        screenY,
+        ambientRadius,
+      );
+      ambientGradient.addColorStop(0, "rgba(0, 0, 0, 0.94)");
+      ambientGradient.addColorStop(0.65, "rgba(0, 0, 0, 0.72)");
+      ambientGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+      lightContext.fillStyle = ambientGradient;
+      lightContext.beginPath();
+      lightContext.arc(screenX, screenY, ambientRadius, 0, Math.PI * 2);
+      lightContext.fill();
+    }
 
     lightContext.globalCompositeOperation = "source-over";
     context.drawImage(overlay, 0, 0, width, height);
